@@ -1059,12 +1059,52 @@ static int efm32_write(struct flash_bank *bank, const uint8_t *buffer,
 	return efm32_priv_write(bank, buffer, bank->base + offset, count);
 }
 
+static char *efm32_get_str_identifier(struct efm32_info *efm32_mcu_info,
+				      char *buf, int len)
+{
+	const char *types = "FMBZxP";
+	unsigned int dev_num, dev_family, dev_type;
+	unsigned int dev_num_digits;
+	char dev_num_letter;
+
+	if (efm32_mcu_info->part_info) {
+		dev_num    = FIELD_GET(EFM32_DI_PARTINFO_NUM_MASK,
+				       efm32_mcu_info->part_info);
+		dev_family = FIELD_GET(EFM32_DI_PARTINFO_FAMILY_MASK,
+				       efm32_mcu_info->part_info);
+		dev_type   = FIELD_GET(EFM32_DI_PARTINFO_TYPE_MASK,
+				       efm32_mcu_info->part_info);
+
+		if (dev_type > strlen(types)) {
+			snprintf(buf, len, "Unknown MCU family %u", dev_type);
+			return buf;
+		}
+
+		dev_num_letter = 'A' + (dev_num / 1000);
+		dev_num_digits = dev_num % 1000;
+
+		snprintf(buf, len, "%s%cG%u %c%03u, rev %" PRIu8,
+			types[dev_type] == 'P' ? "EFM32" : "EFR32",
+			types[dev_type],
+			dev_family,
+			dev_num_letter,
+			dev_num_digits,
+			efm32_mcu_info->part_rev);
+	} else {
+		snprintf(buf, len, "%s Gecko, rev %" PRIu8,
+			efm32_mcu_info->family_data->name,
+			efm32_mcu_info->part_rev);
+	}
+	return buf;
+}
+
 static int efm32_probe(struct flash_bank *bank)
 {
 	struct efm32_flash_chip *efm32_info = bank->driver_priv;
 	struct efm32_info *efm32_mcu_info = &efm32_info->info;
-	int ret;
 	int bank_index = efm32_get_bank_index(bank->base);
+	char strbuf[256];
+	int ret;
 
 	assert(bank_index >= 0);
 
@@ -1075,8 +1115,8 @@ static int efm32_probe(struct flash_bank *bank)
 	if (ret != ERROR_OK)
 		return ret;
 
-	LOG_INFO("detected part: %s Gecko, rev %d",
-		 efm32_mcu_info->family_data->name, efm32_mcu_info->part_rev);
+	LOG_INFO("detected part: %s",
+		 efm32_get_str_identifier(efm32_mcu_info, strbuf, sizeof(strbuf)));
 	LOG_INFO("flash size = %d KiB", efm32_mcu_info->flash_sz_kib);
 	LOG_INFO("flash page size = %d B", efm32_mcu_info->page_size);
 
@@ -1148,6 +1188,7 @@ static int efm32_protect_check(struct flash_bank *bank)
 static int efm32_get_info(struct flash_bank *bank, struct command_invocation *cmd)
 {
 	struct efm32_flash_chip *efm32_info = bank->driver_priv;
+	char strbuf[256];
 	int ret;
 
 	ret = efm32_read_info(bank);
@@ -1156,9 +1197,10 @@ static int efm32_get_info(struct flash_bank *bank, struct command_invocation *cm
 		return ret;
 	}
 
-	command_print_sameline(cmd, "%s Gecko, rev %d",
-			       efm32_info->info.family_data->name,
-			       efm32_info->info.part_rev);
+	command_print_sameline(cmd, "%s",
+			       efm32_get_str_identifier(&efm32_info->info,
+							strbuf,
+							sizeof(strbuf)));
 	return ERROR_OK;
 }
 
@@ -1209,7 +1251,7 @@ static const struct command_registration efm32_command_handlers[] = {
 	{
 		.name = "efm32",
 		.mode = COMMAND_ANY,
-		.help = "efm32 flash command group",
+		.help = "Silicon Labs (EFM32 and EFR32) flash command group",
 		.usage = "",
 		.chain = efm32_exec_command_handlers,
 	},
